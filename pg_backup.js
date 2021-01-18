@@ -1,11 +1,15 @@
 const {execute} = require('@getvim/execute');
 const dotenv = require('dotenv');
+const AWS = require('aws-sdk');
+const fs = require('fs');
+
+const compress = require('gzipme');
+
 dotenv.config();
 const username = process.env.DB_USERNAME;
 const database = process.env.DB_NAME;
 const date = new Date();
 const currentDate = `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}.${date.getHours()}.${date.getMinutes()}`;
-const compress = require('gzipme');
 const fileName = `database-backup-${currentDate}.tar`;
 
 const AWS_ID = process.env.AWS_ID;
@@ -18,14 +22,18 @@ const s3 = new AWS.S3({
     secretAccessKey: AWS_SECRET
 });
 
-function backup() {
-    execute(`pg_dump -U ${username} -d ${database} -f ${fileName} -F t`,).then(async () => {
+async function backup() {
+    try {
+        await execute(`pg_dump -U ${username} -d ${database} -f ${fileName} -F t`,)
+        console.log(`Start ${fileName}`);
         await compress(fileName);
         fs.unlinkSync(fileName);
-        console.log("Finito");
-    }).catch(err => {
-        console.log(err);
-    })
+        console.log(`Finito ${fileName}`);
+    }
+    catch (err) {
+        console.log();
+    } 
+
 } 
 
 function restore() {
@@ -36,22 +44,12 @@ function restore() {
     })
 }
 
-function sendToBackupS3(fileName = fileNameGzip) {
-    const form = new FormData();
-    form.append('file', fileName);
-    axios.post('http://my.backupserver.org/private', form, {headers: form.getHeaders(),}).then(result => {
-        fs.unlinkSync(fileNameGzip);
-        console.log(result.data);
-    }).catch(err => {
-        console.error(err);
-    });
-}
 const uploadFile = () => {
-    const fileContent = fs.readFileSync(fileName);
+    const fileContent = fs.readFileSync(`${fileName}.gz`);
 
     const params = {
         Bucket: BUCKET_NAME,
-        Key: fileName, 
+        Key: `./${fileName}.gz`, 
         Body: fileContent
     };
 
@@ -63,5 +61,9 @@ const uploadFile = () => {
     });
 };
 
-backup();
-uploadFile();
+async function doBackup () {
+     await backup();
+     await uploadFile();
+}
+
+ doBackup();
